@@ -14,6 +14,15 @@ export function startChargerServer(port: number) {
         }
 
         console.log(`Charger connected: ${chargerID}`);
+
+        socket.on("message", (data) => {
+            console.log(`Message from ${chargerID}: ${data.toString()}`);
+        });
+
+        socket.on("close", () => {
+            console.log(`Charger disconnected: ${chargerID}`);
+        });
+
     });
 
     console.log(`Charger server started on port ${port}`);
