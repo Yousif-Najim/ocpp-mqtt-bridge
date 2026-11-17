@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { parseFrame } from "./frames";
 import { handleCall } from "./handlers";
 import { MqttClient } from "mqtt";
-import { handleChargerResponse } from "./commands";
+import { cancelPendingCommandsForCharger, handleChargerResponse } from "./commands";
 
 export function startChargerServer(port: number, mqttClient: MqttClient) {
     // Phone book: charger name to its connection. Used to send commands and to tell who is online
@@ -46,7 +46,7 @@ export function startChargerServer(port: number, mqttClient: MqttClient) {
 
             if (frame.type === "CALL") {
                 handleCall(chargerID, frame, socket, mqttClient);
-            } else { 
+            } else {
                 // CALLRESULT / CALLERROR are answers to our commands (see commands.ts)
                 handleChargerResponse(mqttClient, chargerID, frame);
             }
@@ -59,6 +59,10 @@ export function startChargerServer(port: number, mqttClient: MqttClient) {
             if (chargers.get(chargerID) === socket) {
                 chargers.delete(chargerID);
                 console.log(`Current connected chargers: ${chargers.size}`);
+
+                // Case: disconnect while commands are pending → Offline.
+                // Only when this is still the current connection: an old connection closing after a reconnect doesn't mean the charger is offline
+                cancelPendingCommandsForCharger(mqttClient, chargerID);
             }
         });
 
