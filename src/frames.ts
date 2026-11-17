@@ -70,6 +70,10 @@ export function parseFrame(data: string): Frame | null {
     return null;
 }
 
+export function buildCall(messageId: string, action: string, payload: Record<string, unknown>): string {
+    return JSON.stringify([2, messageId, action, payload]);
+}
+
 export function buildCallResult(messageId: string, payload: Record<string, unknown>): string {
     return JSON.stringify([3, messageId, payload]);
 }

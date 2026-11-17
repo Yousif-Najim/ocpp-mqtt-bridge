@@ -2,6 +2,14 @@ import { WebSocket } from "ws";
 import { MqttClient } from "mqtt";
 import { isObject } from "./frames";
 
+type PendingCommand = {
+    chargerID: string;
+    action: string;
+    requestId: string;
+}
+
+const pendingCommands = new Map<string, PendingCommand>();
+
 export function startCommandListener(mqttClient: MqttClient, chargers: Map<string, WebSocket>) {
     mqttClient.subscribe("chargers/+/cmd/+");
 
