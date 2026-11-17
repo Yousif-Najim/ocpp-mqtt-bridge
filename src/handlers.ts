@@ -1,6 +1,7 @@
 import { WebSocket } from "ws";
 import { Call, buildCallResult, buildCallError } from "./frames";
 import { MqttClient } from "mqtt";
+import { parseMeterValues } from "./meterValues";
 
 const VALID_STATUSES = [
     "Available", "Preparing", "Charging", "SuspendedEV",
@@ -70,6 +71,26 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
                 JSON.stringify({ status, errorCode, timestamp: new Date().toISOString() }),
                 { retain: true, qos: 1 }
             );
+            return;
+        }
+
+        case "MeterValues": {
+            const meterValuesResult = parseMeterValues(chargerID, call.payload);
+            if (!meterValuesResult) {
+                socket.send(buildCallError(call.messageId, "FormationViolation", "Invalid payload for MeterValues", {}));
+                return;
+            }
+
+            socket.send(buildCallResult(call.messageId, {}));
+
+            for (const reading of meterValuesResult.readings) {
+                mqttClient.publish(
+                    `chargers/${chargerID}/connectors/${meterValuesResult.connectorId}/meter`,
+                    JSON.stringify(reading),
+                    { retain: false, qos: 1 }
+                );
+            }
+
             return;
         }
 
