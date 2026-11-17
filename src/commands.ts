@@ -28,6 +28,27 @@ export function startCommandListener(mqttClient: MqttClient, chargers: Map<strin
             return;
         }
 
+        const requestId = command.requestId;
+        const socket = chargers.get(chargerID);
+
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            console.warn(`Charger ${chargerID} is not connected. Cannot send command ${action}.`);
+            publishResult(mqttClient, chargerID, action, {
+                requestId,
+                ok: false,
+                error: { code: "Offline", description: `Charger ${chargerID} is not connected` },
+            });
+            return;
+        }   
+
         console.log(`Received command for charger ${chargerID}: ${action} with requestId: ${command.requestId} and payload:`, command.payload);
     });
+}
+
+function publishResult(mqttClient: MqttClient, chargerID: string, action: string, result: Record<string, unknown>) {
+    mqttClient.publish(
+        `chargers/${chargerID}/cmd/${action}/result`,
+        JSON.stringify(result),
+        { retain: false, qos: 1 }
+    );
 }
