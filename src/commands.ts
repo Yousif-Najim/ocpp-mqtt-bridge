@@ -1,6 +1,7 @@
 import { WebSocket } from "ws";
 import { MqttClient } from "mqtt";
-import { isObject } from "./frames";
+import { isObject, buildCall } from "./frames";
+import { randomUUID } from "crypto";
 
 type PendingCommand = {
     chargerID: string;
@@ -49,7 +50,10 @@ export function startCommandListener(mqttClient: MqttClient, chargers: Map<strin
             return;
         }   
 
-        console.log(`Received command for charger ${chargerID}: ${action} with requestId: ${command.requestId} and payload:`, command.payload);
+        const messageId = randomUUID();
+        pendingCommands.set(messageId, { chargerID, action, requestId });
+        socket.send(buildCall(messageId, action, command.payload));
+        console.log(`Sent command ${action} to charger ${chargerID} with requestId: ${requestId} and messageId: ${messageId}`);
     });
 }
 
