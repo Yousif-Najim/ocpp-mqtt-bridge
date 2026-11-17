@@ -1,14 +1,16 @@
 import { WebSocket } from "ws";
 import { MqttClient } from "mqtt";
-import { isObject, buildCall } from "./frames";
+import { isObject, buildCall, CallResult, CallError } from "./frames";
 import { randomUUID } from "crypto";
 
 type PendingCommand = {
     chargerID: string;
     action: string;
     requestId: string;
+    timer: NodeJS.Timeout;
 }
 
+const COMMAND_TIMEOUT_MS = 30_000;
 const pendingCommands = new Map<string, PendingCommand>();
 
 export function startCommandListener(mqttClient: MqttClient, chargers: Map<string, WebSocket>) {
@@ -51,10 +53,37 @@ export function startCommandListener(mqttClient: MqttClient, chargers: Map<strin
         }   
 
         const messageId = randomUUID();
-        pendingCommands.set(messageId, { chargerID, action, requestId });
+        
+        const timer = setTimeout(() => {
+            if (!pendingCommands.delete(messageId)) {
+                return;
+            }
+            console.warn(`Command ${action} for charger ${chargerID} timed out (requestId: ${requestId}).`);
+            publishResult(mqttClient, chargerID, action, {
+                requestId,
+                ok: false,
+                error: { code: "Timeout", description: `Command ${action} timed out after ${COMMAND_TIMEOUT_MS} ms` },
+            });
+        }, COMMAND_TIMEOUT_MS);
+
+        pendingCommands.set(messageId, { chargerID, action, requestId, timer });
+
         socket.send(buildCall(messageId, action, command.payload));
         console.log(`Sent command ${action} to charger ${chargerID} with requestId: ${requestId} and messageId: ${messageId}`);
     });
+}
+
+export function handleChargerResponse(mqttClient: MqttClient, chargerID: string, response: CallResult | CallError) {
+    const pending = pendingCommands.get(response.messageId);
+    if (!pending || pending.chargerID !== chargerID) {
+        console.warn(`Received unexpected response from charger ${chargerID} with messageId: ${response.messageId}, ignoring.`);
+        return;
+    }
+
+    pendingCommands.delete(response.messageId);
+    clearTimeout(pending.timer);
+
+    console.log(`Received response for command ${pending.action} from charger ${chargerID} (requestId: ${pending.requestId}, messageId: ${response.messageId})`);
 }
 
 function publishResult(mqttClient: MqttClient, chargerID: string, action: string, result: Record<string, unknown>) {
