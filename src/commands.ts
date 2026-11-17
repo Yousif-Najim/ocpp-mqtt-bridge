@@ -119,6 +119,26 @@ export function handleChargerResponse(mqttClient: MqttClient, chargerID: string,
 
 }
 
+// Case: charger disconnects while a command is pending → Offline for each of its open tickets
+export function cancelPendingCommandsForCharger(mqttClient: MqttClient, chargerID: string) {
+    for (const [messageId, pending] of pendingCommands.entries()) {
+        if (pending.chargerID !== chargerID) {
+            continue;
+        }
+
+        // Same rule as everywhere: take the ticket off and stop its timer before posting
+        pendingCommands.delete(messageId);
+        clearTimeout(pending.timer);
+
+        publishResult(mqttClient, chargerID, pending.action, {
+            requestId: pending.requestId,
+            ok: false,
+            error: { code: "Offline", description: `Charger ${chargerID} disconnected before responding to command ${pending.action}` },
+        });
+        console.warn(`Pending command ${pending.action} for charger ${chargerID} canceled due to disconnection (requestId: ${pending.requestId}, messageId: ${messageId}).`);
+    }
+}
+
 // Results are not retained (they are events) and use QoS 1 (a lost result leaves the sender waiting)
 function publishResult(mqttClient: MqttClient, chargerID: string, action: string, result: Record<string, unknown>) {
     mqttClient.publish(
