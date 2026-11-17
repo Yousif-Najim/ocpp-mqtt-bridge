@@ -69,3 +69,16 @@ export function parseFrame(data: string): Frame | null {
 
     return null;
 }
+
+export function buildCallResult(messageId: string, payload: Record<string, unknown>): string {
+    return JSON.stringify([3, messageId, payload]);
+}
+
+export function buildCallError(
+    messageId: string,
+    errorCode: string,
+    errorDescription: string,
+    errorDetails: Record<string, unknown>
+): string {
+    return JSON.stringify([4, messageId, errorCode, errorDescription, errorDetails]);
+}

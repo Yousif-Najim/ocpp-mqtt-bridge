@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { parseFrame } from "./frames";
+import { handleCall } from "./handlers";
 
 export function startChargerServer(port: number) {
     const chargers: Map<string, WebSocket> = new Map();
@@ -35,7 +36,11 @@ export function startChargerServer(port: number) {
                 return;
             }
 
-            console.log(`Recieved ${frame.type} from ${chargerID}:`, frame);
+            if (frame.type === "CALL") {
+                handleCall(chargerID, frame, socket);
+            } else { 
+                console.log(`Received frame ${frame.type} from ${chargerID}:`, frame);
+            }
         });
 
         socket.on("close", () => {
