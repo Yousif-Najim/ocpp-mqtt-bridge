@@ -4,12 +4,17 @@ const ENERGY = "Energy.Active.Import.Register";
 const POWER = "Power.Active.Import";
 const CURRENT = "Current.Import";
 
-export type MeterReading = {
+export type MeterValue = {
     timestamp: string;
     transactionId?: number;
     powerW?: number;
     energyWh?: number;
     currentA?: Record<string, number>;
+};
+
+export type MeterValuesResult = {
+    connectorId: number;
+    readings: MeterValue[];
 };
 
 export function parseNumber(value: unknown): number | null {
@@ -20,13 +25,13 @@ export function parseNumber(value: unknown): number | null {
     return Number.isFinite(number) ? number : null;
 }
 
-export function parseMeterReading(
+export function parseMeterValue(
     chargerID: string,
     timestamp: string,
     transactionID: number | undefined,
     sampledValues: unknown[]
-): MeterReading {
-    const reading: MeterReading = { timestamp };
+): MeterValue {
+    const reading: MeterValue = { timestamp };
     
     if (transactionID !== undefined) {
         reading.transactionId = transactionID;
@@ -86,6 +91,42 @@ export function parseMeterReading(
             }
         }
     }
-
     return reading;
+}
+
+export function parseMeterValues(
+    chargerID: string,
+    payload: Record<string, unknown>
+): MeterValuesResult | null {
+    const connectorId = payload.connectorId;
+    if (typeof connectorId !== "number" || !Number.isInteger(connectorId) || connectorId < 0) {
+        console.error(`Invalid connectorId in meter values for charger ${chargerID}:`, connectorId);
+        return null;
+    }
+
+    const transactionId = payload.transactionId;
+    if (transactionId !== undefined && (typeof transactionId !== "number" || !Number.isInteger(transactionId) || transactionId < 0)) {
+        console.error(`Invalid transactionId in meter values for charger ${chargerID}:`, transactionId);
+        return null;
+    }
+
+    const meterValue = payload.meterValue;
+    if (!Array.isArray(meterValue) || meterValue.length === 0) {
+        console.error(`Invalid meterValue in meter values for charger ${chargerID}:`, meterValue);
+        return null;
+    }
+    
+    const entries: unknown[] = meterValue;
+    const readings: MeterValue[] = [];
+
+    for (const entry of entries) {
+        if (!isObject(entry) || typeof entry.timestamp !== "string" || !Array.isArray(entry.sampledValue)) {
+            console.error(`Invalid sampled value entry in meter values for charger ${chargerID}:`, entry);
+            return null;
+        }
+        const reading = parseMeterValue(chargerID, entry.timestamp, transactionId, entry.sampledValue);
+        readings.push(reading);
+    }
+
+    return { connectorId, readings };
 }
