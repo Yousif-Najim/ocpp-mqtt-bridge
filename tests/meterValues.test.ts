@@ -1,5 +1,5 @@
 import { describe, it, expect } from "@jest/globals";
-import { parseNumber } from "../src/meterValues";
+import { parseNumber, parseMeterValue } from "../src/meterValues";
 
 describe("parseNumber", () => {
 
@@ -49,6 +49,61 @@ describe("parseNumber", () => {
         expect(parseNumber("0123")).toBe(123);
         expect(parseNumber("000")).toBe(0);
         expect(parseNumber("0")).toBe(0);
+    });
+
+});
+
+describe("parseMeterValue", () => {
+    it("translates the case's example", () => {
+        const result = parseMeterValue("charger1", "2026-11-13T10:15:00Z", 42, [
+            { value: "7360", measurand: "Power.Active.Import", unit: "W" },
+            { value: "12.5", measurand: "Energy.Active.Import.Register", unit: "kWh" },
+            { value: "16.0", measurand: "Current.Import", phase: "L1", unit: "A" },
+            { value: "16.1", measurand: "Current.Import", phase: "L2", unit: "A" },
+            { value: "15.9", measurand: "Current.Import", phase: "L3", unit: "A" },
+        ]);
+
+        expect(result).toEqual({
+            timestamp: "2026-11-13T10:15:00Z",
+            transactionId: 42,
+            powerW: 7360,
+            energyWh: 12500,
+            currentA: { L1: 16, L2: 16.1, L3: 15.9 },
+        });
+    });
+
+    it("uses the defaults and leaves out what is missing", () => {
+        const result = parseMeterValue("charger1", "2026-11-13T10:15:00Z", undefined, [
+            { value: "500" },
+        ]);
+        expect(result).toStrictEqual({ timestamp: "2026-11-13T10:15:00Z", energyWh: 500 });
+    });
+
+    it("converts kW to W", () => {
+        const result = parseMeterValue("charger1", "2026-11-13T10:15:00Z", undefined, [
+            { value: "7.4", measurand: "Power.Active.Import", unit: "kW" },
+        ]);
+        expect(result).toStrictEqual({ timestamp: "2026-11-13T10:15:00Z", powerW: 7400 });
+    });
+
+    it("skips a bad value but keeps the rest", () => {
+        const result = parseMeterValue("charger1", "2026-11-13T10:15:00Z", undefined, [
+            "garbage",
+            { value: "abc", measurand: "Power.Active.Import" },
+            { value: "12600" },
+        ]);
+        expect(result).toStrictEqual({ timestamp: "2026-11-13T10:15:00Z", energyWh: 12600 });
+    });
+
+    it("ignores other measurands, unknown units and current without a phase", () => {
+        const result = parseMeterValue("charger1", "2026-11-13T10:15:00Z", undefined, [
+            { value: "230", measurand: "Voltage", unit: "V" },
+            { value: "3", unit: "MJ" },
+            { value: "7", measurand: "Power.Active.Import", unit: "hp" },
+            { value: "16", measurand: "Current.Import", unit: "mA", phase: "L1" },
+            { value: "16", measurand: "Current.Import" },
+        ]);
+        expect(result).toStrictEqual({ timestamp: "2026-11-13T10:15:00Z" });
     });
 
 });
