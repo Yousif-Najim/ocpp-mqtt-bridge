@@ -1,5 +1,6 @@
 import { isObject } from "./frames";
 
+// The three measurands the case cares about; everything else is ignored
 const ENERGY = "Energy.Active.Import.Register";
 const POWER = "Power.Active.Import";
 const CURRENT = "Current.Import";
@@ -17,6 +18,7 @@ export type MeterValuesResult = {
     readings: MeterValue[];
 };
 
+// Values must be text (the case says so). Empty text is rejected first, because Number("") is 0
 export function parseNumber(value: unknown): number | null {
     if (typeof value !== "string" || value.trim() === "") {
         return null;
@@ -33,6 +35,7 @@ export function parseMeterValue(
 ): MeterValue {
     const reading: MeterValue = { timestamp };
     
+    // Leave transactionId out when it is missing (not 0, not null)
     if (transactionID !== undefined) {
         reading.transactionId = transactionID;
     }
@@ -43,12 +46,14 @@ export function parseMeterValue(
             continue;
         }
 
+        // Case: a value that is not a number is skipped and logged; the rest is still processed (continue, not return)
         const value = parseNumber(sampledValue.value);
         if (value === null) {
             console.warn(`Invalid numeric value in sampled value for charger ${chargerID}:`, sampledValue.value);
             continue;
         }
 
+        // Case defaults: no measurand means energy; no unit means Wh / W / A
         const measurand = sampledValue.measurand ?? ENERGY;
 
         switch (measurand) {
@@ -74,6 +79,7 @@ export function parseMeterValue(
                 }
                 break;
             }
+            // Current is grouped per phase (L1, L2, L3). Without a phase we can't tell which wire, so it is skipped
             case CURRENT: {
                 const unit = sampledValue.unit ?? "A";
                 const phase = sampledValue.phase;
@@ -82,6 +88,7 @@ export function parseMeterValue(
                 } else if (typeof phase !== "string") {
                     console.warn(`Phase is missing or invalid for current in charger ${chargerID}:`, phase);
                 } else {
+                    // Only create currentA once there is a reading, so it is left out otherwise
                     if (reading.currentA === undefined) {
                         reading.currentA = {};
                     }
@@ -94,6 +101,8 @@ export function parseMeterValue(
     return reading;
 }
 
+// Checks the structure of the whole payload. A broken structure rejects everything (FormationViolation);
+// a single bad value is only skipped (see parseMeterValue)
 export function parseMeterValues(
     chargerID: string,
     payload: Record<string, unknown>
@@ -111,11 +120,13 @@ export function parseMeterValues(
     }
 
     const meterValue = payload.meterValue;
+    // An empty list is rejected: nothing to publish, and OCPP requires at least one entry
     if (!Array.isArray(meterValue) || meterValue.length === 0) {
         console.error(`Invalid meterValue in meter values for charger ${chargerID}:`, meterValue);
         return null;
     }
     
+    // unknown[] keeps TypeScript strict about the entries (Array.isArray alone would make them any)
     const entries: unknown[] = meterValue;
     const readings: MeterValue[] = [];
 

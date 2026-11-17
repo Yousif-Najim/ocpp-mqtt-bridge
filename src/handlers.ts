@@ -3,11 +3,14 @@ import { Call, buildCallResult, buildCallError } from "./frames";
 import { MqttClient } from "mqtt";
 import { parseMeterValues } from "./meterValues";
 
+// The status values allowed by the case
 const VALID_STATUSES = [
     "Available", "Preparing", "Charging", "SuspendedEV",
     "SuspendedEVSE", "Finishing", "Faulted", "Unavailable",
 ];
 
+// Last status per connector. Lives outside handleCall so it is remembered between messages.
+// Key = charger + connector, because every charger has a connector 1
 const lastStatuses = new Map<string, { status: string; errorCode: string }>();
 
 export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqttClient: MqttClient) {
@@ -16,6 +19,8 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
             const vendor = call.payload.chargePointVendor;
             const model = call.payload.chargePointModel;
 
+            // Case: known action with an invalid payload: FormationViolation, publish nothing.
+            // No defaults here: a missing field is an error
             if (typeof vendor !== "string" || typeof model !== "string") {
                 socket.send(buildCallError(call.messageId, "FormationViolation", "chargePointVendor and chargePointModel must be strings", {}));
                 return;
@@ -27,6 +32,7 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
                 interval: 300,
             }));
 
+            // Retained so services that start later still see the info; QoS 1: must not get lost, a duplicate is harmless
             mqttClient.publish(
                 `chargers/${chargerID}/info`,
                 JSON.stringify({ vendor, model }),
@@ -59,6 +65,7 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
             const key = `${chargerID}-${connectorId}`;
             const last = lastStatuses.get(key);
 
+            // Case: only publish when status or errorCode changed
             if (last && last.status === status && last.errorCode === errorCode) {
                 console.log(`No status change for ${key}, not publishing to MQTT.`);
                 return;
@@ -83,6 +90,7 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
 
             socket.send(buildCallResult(call.messageId, {}));
 
+            // Case: one MQTT message per meterValue entry. Not retained: a reading is an event, not a state
             for (const reading of meterValuesResult.readings) {
                 mqttClient.publish(
                     `chargers/${chargerID}/connectors/${meterValuesResult.connectorId}/meter`,
@@ -94,6 +102,7 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
             return;
         }
 
+        // Case: unknown action: NotImplemented
         default:
             socket.send(buildCallError(call.messageId, "NotImplemented", `Action ${call.action} is not implemented`, {}));
             return;
