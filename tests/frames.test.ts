@@ -1,10 +1,9 @@
 import { describe, it, expect } from "@jest/globals";
-import { parseFrame } from "../src/frames";
+import { parseFrame, buildCallResult, buildCallError } from "../src/frames";
 
 describe("parseFrame", () => {
-
     it("turns a valid CALL into a typed package", () => {
-        expect(parseFrame('[2,"1","Heartbeat",{}]')).toEqual({
+        expect(parseFrame('[2,"1","Heartbeat",{}]')).toStrictEqual({
             type: "CALL",
             messageId: "1",
             action: "Heartbeat",
@@ -27,7 +26,7 @@ describe("parseFrame", () => {
     });
 
     it("turns a valid CALLRESULT into a typed package", () => {
-        expect(parseFrame('[3,"1",{"currentTime":"2024-06-01T12:00:00Z"}]')).toEqual({
+        expect(parseFrame('[3,"1",{"currentTime":"2024-06-01T12:00:00Z"}]')).toStrictEqual({
             type: "CALLRESULT",
             messageId: "1",
             payload: { currentTime: "2024-06-01T12:00:00Z" },
@@ -35,7 +34,7 @@ describe("parseFrame", () => {
     });
 
     it("turns a valid CALLERROR into a typed package", () => {
-        expect(parseFrame('[4,"1","InternalError","An error occurred",{}]')).toEqual({
+        expect(parseFrame('[4,"1","InternalError","An error occurred",{}]')).toStrictEqual({
             type: "CALLERROR",
             messageId: "1",
             errorCode: "InternalError",
@@ -76,5 +75,14 @@ describe("parseFrame", () => {
         expect(parseFrame('[5,"1",{}]')).toBeNull();
         expect(parseFrame("hello")).toBeNull();
     });
+});
 
+describe("building replies", () => {
+    it("builds a CALLRESULT", () => {
+        expect(buildCallResult("1", { status: "Accepted" })).toBe('[3,"1",{"status":"Accepted"}]');
+    });
+
+    it("builds a CALLERROR", () => {
+        expect(buildCallError("2", "NotImplemented", "Unknown action", {})).toBe('[4,"2","NotImplemented","Unknown action",{}]');
+    });
 });

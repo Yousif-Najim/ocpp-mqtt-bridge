@@ -1,8 +1,7 @@
 import { describe, it, expect } from "@jest/globals";
-import { parseNumber, parseMeterValue } from "../src/meterValues";
+import { parseNumber, parseMeterValue, parseMeterValues } from "../src/meterValues";
 
 describe("parseNumber", () => {
-
     it("turns text into a number", () => {
         expect(parseNumber("7360")).toBe(7360);
     });
@@ -63,7 +62,7 @@ describe("parseMeterValue", () => {
             { value: "15.9", measurand: "Current.Import", phase: "L3", unit: "A" },
         ]);
 
-        expect(result).toEqual({
+        expect(result).toStrictEqual({
             timestamp: "2026-11-13T10:15:00Z",
             transactionId: 42,
             powerW: 7360,
@@ -106,4 +105,58 @@ describe("parseMeterValue", () => {
         expect(result).toStrictEqual({ timestamp: "2026-11-13T10:15:00Z" });
     });
 
+    it("defaults power to W when the unit is missing", () => {
+        const result = parseMeterValue("charger1", "2026-11-13T10:15:00Z", undefined, [
+            { value: "7360", measurand: "Power.Active.Import" },
+        ]);
+        expect(result).toStrictEqual({ timestamp: "2026-11-13T10:15:00Z", powerW: 7360 });
+    });
+
+});
+
+describe("parseMeterValues", () => {
+    it("translates every entry and returns the connector", () => {
+        const result = parseMeterValues("charger1", {
+            connectorId: 1,
+            transactionId: 42,
+            meterValue: [
+                { timestamp: "2026-11-13T10:17:00Z", sampledValue: [{ value: "100" }] },
+                { timestamp: "2026-11-13T10:18:00Z", sampledValue: [{ value: "200" }] },
+            ],
+        });
+        expect(result).toStrictEqual({
+            connectorId: 1,
+            readings: [
+                { timestamp: "2026-11-13T10:17:00Z", transactionId: 42, energyWh: 100 },
+                { timestamp: "2026-11-13T10:18:00Z", transactionId: 42, energyWh: 200 },
+            ],
+        });
+    });
+
+    it("rejects a bad connectorId", () => {
+        const meterValue = [{ timestamp: "2026-11-13T10:17:00Z", sampledValue: [] }];
+        expect(parseMeterValues("charger1", { meterValue })).toBeNull();
+        expect(parseMeterValues("charger1", { connectorId: "1", meterValue })).toBeNull();
+        expect(parseMeterValues("charger1", { connectorId: -1, meterValue })).toBeNull();
+        expect(parseMeterValues("charger1", { connectorId: 1.5, meterValue })).toBeNull();
+    });
+
+    it("rejects a bad transactionId", () => {
+        const meterValue = [{ timestamp: "2026-11-13T10:17:00Z", sampledValue: [] }];
+        expect(parseMeterValues("charger1", { connectorId: 1, transactionId: "42", meterValue })).toBeNull();
+        expect(parseMeterValues("charger1", { connectorId: 1, transactionId: 4.2, meterValue })).toBeNull();
+    });
+
+    it("rejects a missing or empty meterValue list", () => {
+        expect(parseMeterValues("charger1", { connectorId: 1 })).toBeNull();
+        expect(parseMeterValues("charger1", { connectorId: 1, meterValue: [] })).toBeNull();
+        expect(parseMeterValues("charger1", { connectorId: 1, meterValue: "hello" })).toBeNull();
+    });
+
+    it("rejects the whole payload if one entry is broken", () => {
+        const good = { timestamp: "2026-11-13T10:17:00Z", sampledValue: [{ value: "100" }] };
+        expect(parseMeterValues("charger1", { connectorId: 1, meterValue: [good, { sampledValue: [] }] })).toBeNull();
+        expect(parseMeterValues("charger1", { connectorId: 1, meterValue: [good, { timestamp: "2026-11-13T10:18:00Z", sampledValue: "oops" }] })).toBeNull();
+        expect(parseMeterValues("charger1", { connectorId: 1, meterValue: [good, "garbage"] })).toBeNull();
+    });
 });
