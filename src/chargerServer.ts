@@ -1,8 +1,9 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { parseFrame } from "./frames";
 import { handleCall } from "./handlers";
+import { MqttClient } from "mqtt";
 
-export function startChargerServer(port: number) {
+export function startChargerServer(port: number, mqttClient: MqttClient) {
     const chargers: Map<string, WebSocket> = new Map();
     const server = new WebSocketServer({ port });
 
@@ -37,7 +38,7 @@ export function startChargerServer(port: number) {
             }
 
             if (frame.type === "CALL") {
-                handleCall(chargerID, frame, socket);
+                handleCall(chargerID, frame, socket, mqttClient);
             } else { 
                 console.log(`Received frame ${frame.type} from ${chargerID}:`, frame);
             }
