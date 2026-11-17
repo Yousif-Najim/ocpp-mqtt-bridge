@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { parseFrame } from "./frames";
 
 export function startChargerServer(port: number) {
     const chargers: Map<string, WebSocket> = new Map();
@@ -26,7 +27,15 @@ export function startChargerServer(port: number) {
         console.log(`Current connected chargers: size ${chargers.size}`);
 
         socket.on("message", (data) => {
-            console.log(`Message from ${chargerID}: ${data.toString()}`);
+            const textData = data.toString();
+            const frame = parseFrame(textData);
+
+            if (!frame) {
+                console.error(`Invalid frame received from ${chargerID}: ${textData}`);
+                return;
+            }
+
+            console.log(`Recieved ${frame.type} from ${chargerID}:`, frame);
         });
 
         socket.on("close", () => {
