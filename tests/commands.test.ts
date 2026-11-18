@@ -1,7 +1,7 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { WebSocket } from "ws";
 import { MqttClient } from "mqtt";
-import { handleCommandMessage, handleChargerResponse } from "../src/commands";
+import { handleCommandMessage, handleChargerResponse, cancelPendingCommandsForCharger } from "../src/commands";
 
 // Fakes instead of a real broker and charger: they only remember what was published and sent
 function setup() {
@@ -125,6 +125,77 @@ describe("commands", () => {
 
         expect(fakes.publishToMQTT).toHaveBeenCalledTimes(1);
         expect(lastResult(fakes).ok).toBe(true);
+    });
+
+    it("posts Offline for every open command when the charger disconnects", () => {
+        const fakes = setup();
+        handleCommandMessage(fakes.mqttClient, fakes.chargers, "chargers/charger1/cmd/Reset", '{"requestId":"r1","payload":{}}', false);
+        handleCommandMessage(fakes.mqttClient, fakes.chargers, "chargers/charger1/cmd/UnlockConnector", '{"requestId":"r2","payload":{}}', false);
+
+        cancelPendingCommandsForCharger(fakes.mqttClient, "charger1");
+
+        expect(fakes.publishToMQTT).toHaveBeenCalledTimes(2);
+        const [topic1, message1] = fakes.publishToMQTT.mock.calls[0];
+        expect(topic1).toBe("chargers/charger1/cmd/Reset/result");
+        expect(JSON.parse(message1)).toStrictEqual({
+            requestId: "r1",
+            ok: false,
+            error: { code: "Offline", description: "Charger charger1 disconnected before responding to command Reset" },
+        });
+        const [topic2, message2] = fakes.publishToMQTT.mock.calls[1];
+        expect(topic2).toBe("chargers/charger1/cmd/UnlockConnector/result");
+        expect(JSON.parse(message2).error.code).toBe("Offline");
+
+        // The timers were stopped, so no Timeout follows
+        jest.advanceTimersByTime(30_000);
+        expect(fakes.publishToMQTT).toHaveBeenCalledTimes(2);
+    });
+
+    it("leaves other chargers' commands alone when one charger disconnects", () => {
+        const fakes = setup();
+        const charger2 = { readyState: WebSocket.OPEN, send: jest.fn() } as unknown as WebSocket;
+        fakes.chargers.set("charger2", charger2);
+        handleCommandMessage(fakes.mqttClient, fakes.chargers, "chargers/charger2/cmd/Reset", '{"requestId":"r2","payload":{}}', false);
+
+        cancelPendingCommandsForCharger(fakes.mqttClient, "charger1");
+        expect(fakes.publishToMQTT).not.toHaveBeenCalled();
+
+        // charger2's command is still waiting, and times out normally on charger2's own topic
+        jest.advanceTimersByTime(30_000);
+        expect(fakes.publishToMQTT).toHaveBeenCalledTimes(1);
+        const [topic] = fakes.publishToMQTT.mock.calls[0];
+        expect(topic).toBe("chargers/charger2/cmd/Reset/result");
+        expect(lastResult(fakes).error.code).toBe("Timeout");
+    });
+
+    it("ignores a retained command: nothing is sent and no result is posted", () => {
+        const fakes = setup();
+
+        handleCommandMessage(fakes.mqttClient, fakes.chargers, "chargers/charger1/cmd/Reset", '{"requestId":"r1","payload":{}}', true);
+
+        expect(fakes.sendToCharger).not.toHaveBeenCalled();
+        expect(fakes.publishToMQTT).not.toHaveBeenCalled();
+    });
+
+    it("drops an invalid command: nothing is sent and no result is posted", () => {
+        const fakes = setup();
+        const topic = "chargers/charger1/cmd/Reset";
+
+        handleCommandMessage(fakes.mqttClient, fakes.chargers, topic, "hello", false);
+        handleCommandMessage(fakes.mqttClient, fakes.chargers, topic, '{"payload":{}}', false);
+        handleCommandMessage(fakes.mqttClient, fakes.chargers, topic, '{"requestId":"r1","payload":"oops"}', false);
+
+        expect(fakes.sendToCharger).not.toHaveBeenCalled();
+        expect(fakes.publishToMQTT).not.toHaveBeenCalled();
+    });
+
+    it("ignores topics that are not exactly chargers/{id}/cmd/{action}, like our own results", () => {
+        const fakes = setup();
+
+        handleCommandMessage(fakes.mqttClient, fakes.chargers, "chargers/charger1/cmd/Reset/result", '{"requestId":"r1","payload":{}}', false);
+
+        expect(fakes.sendToCharger).not.toHaveBeenCalled();
+        expect(fakes.publishToMQTT).not.toHaveBeenCalled();
     });
 
 });
