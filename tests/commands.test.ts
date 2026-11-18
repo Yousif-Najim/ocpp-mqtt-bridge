@@ -105,4 +105,26 @@ describe("commands", () => {
         });
     });
 
+    it("ignores an answer that arrives after the timeout, so there is exactly one result", () => {
+        const fakes = setup();
+        const messageId = sendResetToCharger1(fakes);
+
+        jest.advanceTimersByTime(30_000);
+        handleChargerResponse(fakes.mqttClient, "charger1", { type: "CALLRESULT", messageId, payload: {} });
+
+        expect(fakes.publishToMQTT).toHaveBeenCalledTimes(1);
+        expect(lastResult(fakes).error.code).toBe("Timeout");
+    });
+
+    it("stops the timer when the charger answers, so no Timeout follows", () => {
+        const fakes = setup();
+        const messageId = sendResetToCharger1(fakes);
+
+        handleChargerResponse(fakes.mqttClient, "charger1", { type: "CALLRESULT", messageId, payload: {} });
+        jest.advanceTimersByTime(30_000);
+
+        expect(fakes.publishToMQTT).toHaveBeenCalledTimes(1);
+        expect(lastResult(fakes).ok).toBe(true);
+    });
+
 });
