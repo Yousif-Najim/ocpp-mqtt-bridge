@@ -27,8 +27,8 @@ function lastResult(fakes: ReturnType<typeof setup>) {
 }
 
 describe("commands", () => {
-    // A fake clock, so 30 seconds can pass instantly. Afterwards, ring any leftover timers
-    // so no ticket stays on the board for the next test
+    // A fake clock, so 30 seconds can pass instantly.
+    // Afterwards, ring any leftover timers, so no ticket stays on the board for the next test
     beforeEach(() => {
         jest.useFakeTimers();
     });
@@ -160,7 +160,7 @@ describe("commands", () => {
         cancelPendingCommandsForCharger(fakes.mqttClient, "charger1");
         expect(fakes.publishToMQTT).not.toHaveBeenCalled();
 
-        // charger2's command is still waiting, and times out normally on charger2's own topic
+        // The command for charger2 is still waiting, and times out normally on charger2's own topic
         jest.advanceTimersByTime(30_000);
         expect(fakes.publishToMQTT).toHaveBeenCalledTimes(1);
         const [topic] = fakes.publishToMQTT.mock.calls[0];

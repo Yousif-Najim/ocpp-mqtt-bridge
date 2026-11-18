@@ -36,7 +36,7 @@ export function parseFrame(data: string): Frame | null {
         return null;
     }
 
-    // unknown[] keeps TypeScript strict about the items (Array.isArray alone would make them any)
+    // Using unknown[] keeps TypeScript strict about the items (Array.isArray alone would make them any)
     const parts: unknown[] = Array.isArray(frame) ? frame : [];
     const [kind, messageId, third, fourth, fifth] = parts;
 

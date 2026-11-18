@@ -13,7 +13,7 @@ const VALID_STATUSES = [
 // Key = charger + connector, because every charger has a connector 1
 const lastStatuses = new Map<string, { status: string; errorCode: string }>();
 
-export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqttClient: MqttClient) {
+export function handleCall(chargerId: string, call: Call, socket: WebSocket, mqttClient: MqttClient) {
     switch (call.action) {
         case "BootNotification": {
             const vendor = call.payload.chargePointVendor;
@@ -34,7 +34,7 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
 
             // Retained so services that start later still see the info; QoS 1: must not get lost, a duplicate is harmless
             mqttClient.publish(
-                `chargers/${chargerID}/info`,
+                `chargers/${chargerId}/info`,
                 JSON.stringify({ vendor, model }),
                 { retain: true, qos: 1 }
             );
@@ -62,7 +62,7 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
 
             socket.send(buildCallResult(call.messageId, {}));
 
-            const key = `${chargerID}-${connectorId}`;
+            const key = `${chargerId}-${connectorId}`;
             const last = lastStatuses.get(key);
 
             // Case: only publish when status or errorCode changed
@@ -74,7 +74,7 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
             lastStatuses.set(key, { status, errorCode });
 
             mqttClient.publish(
-                `chargers/${chargerID}/connectors/${connectorId}/status`,
+                `chargers/${chargerId}/connectors/${connectorId}/status`,
                 JSON.stringify({ status, errorCode, timestamp: new Date().toISOString() }),
                 { retain: true, qos: 1 }
             );
@@ -82,7 +82,7 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
         }
 
         case "MeterValues": {
-            const meterValuesResult = parseMeterValues(chargerID, call.payload);
+            const meterValuesResult = parseMeterValues(chargerId, call.payload);
             if (!meterValuesResult) {
                 socket.send(buildCallError(call.messageId, "FormationViolation", "Invalid payload for MeterValues", {}));
                 return;
@@ -93,7 +93,7 @@ export function handleCall(chargerID: string, call: Call, socket: WebSocket, mqt
             // Case: one MQTT message per meterValue entry. Not retained: a reading is an event, not a state
             for (const reading of meterValuesResult.readings) {
                 mqttClient.publish(
-                    `chargers/${chargerID}/connectors/${meterValuesResult.connectorId}/meter`,
+                    `chargers/${chargerId}/connectors/${meterValuesResult.connectorId}/meter`,
                     JSON.stringify(reading),
                     { retain: false, qos: 1 }
                 );

@@ -11,27 +11,27 @@ export function startChargerServer(port: number, mqttClient: MqttClient) {
 
     server.on("connection", (socket, request) => {
 
-        // The charger's name is the last part of the URL: ws://host:9000/{chargerId}
-        const chargerID = request.url?.substring(1);
+        // The charger's name comes from the URL path: ws://host:9000/{chargerId}
+        const chargerId = parseChargerId(request.url);
 
-        if (!chargerID) {
-            console.error("Charger ID not provided in the connection URL.");
-            // 1008 = WebSocket "policy violation": we can't work with a charger that has no name
-            socket.close(1008, "Charger ID not provided");
+        if (!chargerId) {
+            console.error(`Missing or invalid charger ID in the connection URL: ${request.url}`);
+            // Close code 1008 = WebSocket "policy violation": we can't work with a charger without a usable name
+            socket.close(1008, "Missing or invalid charger ID");
             return;
         }
 
-        console.log(`Charger connected: ${chargerID}`);
+        console.log(`Charger connected: ${chargerId}`);
 
         // Newest connection wins: a second connection with the same name almost always means the charger reconnected
-        const existingSocket = chargers.get(chargerID);
+        const existingSocket = chargers.get(chargerId);
         if (existingSocket) {
-            console.log(`Charger ${chargerID} is already connected. Closing the previous connection.`);
+            console.log(`Charger ${chargerId} is already connected. Closing the previous connection.`);
             existingSocket.close(1000, "New connection established");
         }
 
-        chargers.set(chargerID, socket);
-        console.log(`Current connected chargers: size ${chargers.size}`);
+        chargers.set(chargerId, socket);
+        console.log(`Connected chargers: ${chargers.size}`);
 
         socket.on("message", (data) => {
             const textData = data.toString();
@@ -40,29 +40,34 @@ export function startChargerServer(port: number, mqttClient: MqttClient) {
 
             // Case: invalid JSON or not one of the three shapes: log and drop, the connection stays open
             if (!frame) {
-                console.error(`Invalid frame received from ${chargerID}: ${textData}`);
+                console.error(`Invalid frame received from ${chargerId}: ${textData}`);
                 return;
             }
 
             if (frame.type === "CALL") {
-                handleCall(chargerID, frame, socket, mqttClient);
+                handleCall(chargerId, frame, socket, mqttClient);
             } else {
                 // CALLRESULT / CALLERROR are answers to our commands (see commands.ts)
-                handleChargerResponse(mqttClient, chargerID, frame);
+                handleChargerResponse(mqttClient, chargerId, frame);
             }
         });
 
+        // Without an error listener, a broken WebSocket frame would crash the whole bridge
+        socket.on("error", (error) => {
+            console.error(`WebSocket error from ${chargerId}: ${error.message}`);
+        });
+
         socket.on("close", () => {
-            console.log(`Charger disconnected: ${chargerID}`);
+            console.log(`Charger disconnected: ${chargerId}`);
 
             // Only remove the entry if it is still this connection: after a quick reconnect it already points to the new one
-            if (chargers.get(chargerID) === socket) {
-                chargers.delete(chargerID);
-                console.log(`Current connected chargers: ${chargers.size}`);
+            if (chargers.get(chargerId) === socket) {
+                chargers.delete(chargerId);
+                console.log(`Connected chargers: ${chargers.size}`);
 
                 // Case: disconnect while commands are pending → Offline.
                 // Only when this is still the current connection: an old connection closing after a reconnect doesn't mean the charger is offline
-                cancelPendingCommandsForCharger(mqttClient, chargerID);
+                cancelPendingCommandsForCharger(mqttClient, chargerId);
             }
         });
 
@@ -70,4 +75,21 @@ export function startChargerServer(port: number, mqttClient: MqttClient) {
 
     console.log(`Charger server started on port ${port}`);
     return chargers;
+}
+
+// Returns the charger ID from the connection URL, or null if it can't safely be used in MQTT topics.
+// Only the path counts (a query string like ?token=abc is ignored), and %-encoded characters are decoded.
+export function parseChargerId(url: string | undefined): string | null {
+    let chargerId: string;
+    try {
+        chargerId = decodeURIComponent(new URL(url ?? "/", "ws://localhost").pathname.substring(1));
+    } catch {
+        return null;
+    }
+
+    // An empty name, or MQTT topic characters (/ + #), would break or misroute the topics
+    if (chargerId === "" || /[/+#]/.test(chargerId)) {
+        return null;
+    }
+    return chargerId;
 }

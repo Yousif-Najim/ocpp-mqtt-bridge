@@ -5,8 +5,6 @@ export function connectToMQTTBroker(brokerUrl: string) {
 
     client.on("connect", () => {
         console.log(`Connected to MQTT broker at ${brokerUrl}`);
-        // TODO: temporary test message, remove before hand-in
-        client.publish("bridge/status", "Bridge connected");
     });
 
     // The mqtt library reconnects (and resubscribes) by itself, important at the edge where networks drop

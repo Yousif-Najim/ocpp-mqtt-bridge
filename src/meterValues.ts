@@ -28,28 +28,28 @@ export function parseNumber(value: unknown): number | null {
 }
 
 export function parseMeterValue(
-    chargerID: string,
+    chargerId: string,
     timestamp: string,
-    transactionID: number | undefined,
+    transactionId: number | undefined,
     sampledValues: unknown[]
 ): MeterValue {
     const reading: MeterValue = { timestamp };
     
     // Leave transactionId out when it is missing (not 0, not null)
-    if (transactionID !== undefined) {
-        reading.transactionId = transactionID;
+    if (transactionId !== undefined) {
+        reading.transactionId = transactionId;
     }
 
     for (const sampledValue of sampledValues) {
         if (!isObject(sampledValue)) {
-            console.warn(`Invalid sampled value for charger ${chargerID}:`, sampledValue);
+            console.warn(`Invalid sampled value for charger ${chargerId}:`, sampledValue);
             continue;
         }
 
         // Case: a value that is not a number is skipped and logged; the rest is still processed (continue, not return)
         const value = parseNumber(sampledValue.value);
         if (value === null) {
-            console.warn(`Invalid numeric value in sampled value for charger ${chargerID}:`, sampledValue.value);
+            console.warn(`Invalid numeric value in sampled value for charger ${chargerId}:`, sampledValue.value);
             continue;
         }
 
@@ -64,7 +64,7 @@ export function parseMeterValue(
                 } else if (unit === "kWh") {
                     reading.energyWh = value * 1000;
                 } else {
-                    console.warn(`Unsupported unit for energy in charger ${chargerID}:`, unit);
+                    console.warn(`Unsupported unit for energy in charger ${chargerId}:`, unit);
                 }
                 break;
             }
@@ -75,7 +75,7 @@ export function parseMeterValue(
                 } else if (unit === "kW") {
                     reading.powerW = value * 1000;
                 } else {
-                    console.warn(`Unsupported unit for power in charger ${chargerID}:`, unit);
+                    console.warn(`Unsupported unit for power in charger ${chargerId}:`, unit);
                 }
                 break;
             }
@@ -84,9 +84,9 @@ export function parseMeterValue(
                 const unit = sampledValue.unit ?? "A";
                 const phase = sampledValue.phase;
                 if (unit !== "A") {
-                    console.warn(`Unsupported unit for current in charger ${chargerID}:`, unit);
+                    console.warn(`Unsupported unit for current in charger ${chargerId}:`, unit);
                 } else if (typeof phase !== "string") {
-                    console.warn(`Phase is missing or invalid for current in charger ${chargerID}:`, phase);
+                    console.warn(`Phase is missing or invalid for current in charger ${chargerId}:`, phase);
                 } else {
                     // Only create currentA once there is a reading, so it is left out otherwise
                     if (reading.currentA === undefined) {
@@ -101,41 +101,41 @@ export function parseMeterValue(
     return reading;
 }
 
-// Checks the structure of the whole payload. A broken structure rejects everything (FormationViolation);
-// a single bad value is only skipped (see parseMeterValue)
+// Checks the structure of the whole payload. A broken structure rejects everything (FormationViolation).
+// A single bad value is only skipped (see parseMeterValue)
 export function parseMeterValues(
-    chargerID: string,
+    chargerId: string,
     payload: Record<string, unknown>
 ): MeterValuesResult | null {
     const connectorId = payload.connectorId;
     if (typeof connectorId !== "number" || !Number.isInteger(connectorId) || connectorId < 0) {
-        console.error(`Invalid connectorId in meter values for charger ${chargerID}:`, connectorId);
+        console.error(`Invalid connectorId in meter values for charger ${chargerId}:`, connectorId);
         return null;
     }
 
     const transactionId = payload.transactionId;
     if (transactionId !== undefined && (typeof transactionId !== "number" || !Number.isInteger(transactionId) || transactionId < 0)) {
-        console.error(`Invalid transactionId in meter values for charger ${chargerID}:`, transactionId);
+        console.error(`Invalid transactionId in meter values for charger ${chargerId}:`, transactionId);
         return null;
     }
 
     const meterValue = payload.meterValue;
     // An empty list is rejected: nothing to publish, and OCPP requires at least one entry
     if (!Array.isArray(meterValue) || meterValue.length === 0) {
-        console.error(`Invalid meterValue in meter values for charger ${chargerID}:`, meterValue);
+        console.error(`Invalid meterValue in meter values for charger ${chargerId}:`, meterValue);
         return null;
     }
     
-    // unknown[] keeps TypeScript strict about the entries (Array.isArray alone would make them any)
+    // Using unknown[] keeps TypeScript strict about the entries (Array.isArray alone would make them any)
     const entries: unknown[] = meterValue;
     const readings: MeterValue[] = [];
 
     for (const entry of entries) {
         if (!isObject(entry) || typeof entry.timestamp !== "string" || !Array.isArray(entry.sampledValue)) {
-            console.error(`Invalid sampled value entry in meter values for charger ${chargerID}:`, entry);
+            console.error(`Invalid meterValue entry for charger ${chargerId}:`, entry);
             return null;
         }
-        const reading = parseMeterValue(chargerID, entry.timestamp, transactionId, entry.sampledValue);
+        const reading = parseMeterValue(chargerId, entry.timestamp, transactionId, entry.sampledValue);
         readings.push(reading);
     }
 
