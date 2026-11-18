@@ -1,0 +1,108 @@
+import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
+import { WebSocket } from "ws";
+import { MqttClient } from "mqtt";
+import { handleCommandMessage, handleChargerResponse } from "../src/commands";
+
+// Fakes instead of a real broker and charger: they only remember what was published and sent
+function setup() {
+    const publishToMQTT = jest.fn<(topic: string, message: string, options: object) => void>();
+    const sendToCharger = jest.fn<(data: string) => void>();
+    const mqttClient = { publish: publishToMQTT } as unknown as MqttClient;
+    const socket = { readyState: WebSocket.OPEN, send: sendToCharger } as unknown as WebSocket;
+    const chargers = new Map<string, WebSocket>([["charger1", socket]]);
+    return { publishToMQTT, sendToCharger, mqttClient, chargers };
+}
+
+// Sends a Reset command for charger1 and returns the messageId the charger received
+function sendResetToCharger1(fakes: ReturnType<typeof setup>): string {
+    handleCommandMessage(fakes.mqttClient, fakes.chargers, "chargers/charger1/cmd/Reset", '{"requestId":"r1","payload":{"type":"Soft"}}', false);
+    const call = JSON.parse(fakes.sendToCharger.mock.calls[0][0]);
+    return call[1];
+}
+
+// The last result that was published, turned back into an object
+function lastResult(fakes: ReturnType<typeof setup>) {
+    const calls = fakes.publishToMQTT.mock.calls;
+    return JSON.parse(calls[calls.length - 1][1]);
+}
+
+describe("commands", () => {
+    // A fake clock, so 30 seconds can pass instantly. Afterwards, ring any leftover timers
+    // so no ticket stays on the board for the next test
+    beforeEach(() => {
+        jest.useFakeTimers();
+    });
+    afterEach(() => {
+        jest.runOnlyPendingTimers();
+        jest.useRealTimers();
+    });
+
+    it("posts Offline when the charger is not connected", () => {
+        const { publishToMQTT, mqttClient, chargers } = setup();
+
+        handleCommandMessage(mqttClient, chargers, "chargers/charger2/cmd/Reset", '{"requestId":"r1","payload":{}}', false);
+
+        expect(publishToMQTT).toHaveBeenCalledTimes(1);
+        const [topic, message] = publishToMQTT.mock.calls[0];
+        expect(topic).toBe("chargers/charger2/cmd/Reset/result");
+        expect(JSON.parse(message)).toStrictEqual({
+            requestId: "r1",
+            ok: false,
+            error: { code: "Offline", description: "Charger charger2 is not connected" },
+        });
+    });
+
+    it("sends a CALL with a new messageId and posts ok: true when the charger answers", () => {
+        const { publishToMQTT, sendToCharger, mqttClient, chargers } = setup();
+
+        handleCommandMessage(mqttClient, chargers, "chargers/charger1/cmd/Reset", '{"requestId":"r1","payload":{"type":"Soft"}}', false);
+
+        // The charger received [2, messageId, "Reset", payload], with a messageId we generated
+        expect(sendToCharger).toHaveBeenCalledTimes(1);
+        const [kind, messageId, action, payload] = JSON.parse(sendToCharger.mock.calls[0][0]);
+        expect(kind).toBe(2);
+        expect(action).toBe("Reset");
+        expect(payload).toStrictEqual({ type: "Soft" });
+
+        // The charger answers "yes, done" with the same messageId
+        handleChargerResponse(mqttClient, "charger1", { type: "CALLRESULT", messageId, payload: { status: "Accepted" } });
+
+        expect(publishToMQTT).toHaveBeenCalledTimes(1);
+        const [topic, message] = publishToMQTT.mock.calls[0];
+        expect(topic).toBe("chargers/charger1/cmd/Reset/result");
+        expect(JSON.parse(message)).toStrictEqual({ requestId: "r1", ok: true, payload: { status: "Accepted" } });
+    });
+
+    it("posts ok: false with the charger's own error when it answers with CALLERROR", () => {
+        const fakes = setup();
+        const messageId = sendResetToCharger1(fakes);
+
+        handleChargerResponse(fakes.mqttClient, "charger1", {
+            type: "CALLERROR", messageId, errorCode: "InternalError", errorDescription: "Busy", errorDetails: {},
+        });
+
+        expect(fakes.publishToMQTT).toHaveBeenCalledTimes(1);
+        expect(lastResult(fakes)).toStrictEqual({
+            requestId: "r1",
+            ok: false,
+            error: { code: "InternalError", description: "Busy" },
+        });
+    });
+
+    it("posts Timeout when the charger does not answer within 30 seconds", () => {
+        const fakes = setup();
+        sendResetToCharger1(fakes);
+
+        jest.advanceTimersByTime(29_999);
+        expect(fakes.publishToMQTT).not.toHaveBeenCalled();
+
+        jest.advanceTimersByTime(1);
+        expect(fakes.publishToMQTT).toHaveBeenCalledTimes(1);
+        expect(lastResult(fakes)).toStrictEqual({
+            requestId: "r1",
+            ok: false,
+            error: { code: "Timeout", description: "Command Reset timed out after 30000 ms" },
+        });
+    });
+
+});
